@@ -53,7 +53,7 @@ func (c *Client) ChatCompletion(query string) (string, error) {
 			},
 		},
 		Temperature:    0.9,
-		Stream:         true,
+		Stream:         config.Conf.Openai.Stream,
 		MaxTokens:      8192,
 		ResponseFormat: responseFormat,
 	}
@@ -62,29 +62,47 @@ func (c *Client) ChatCompletion(query string) (string, error) {
 		req.Model = config.Conf.Openai.Model
 	}
 
-	stream, err := c.client.CreateChatCompletionStream(context.Background(), req)
-	if err != nil {
-		log.GetLogger().Error("openai create chat completion stream failed", zap.Error(err))
-		return "", err
-	}
-	defer stream.Close()
-
 	var resContent string
-	for {
-		response, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
+
+	if !config.Conf.Openai.Stream {
+		// Use non-streaming mode for JSON responses
+		resp, err := c.client.CreateChatCompletion(context.Background(), req)
 		if err != nil {
-			log.GetLogger().Error("openai stream receive failed", zap.Error(err))
+			log.GetLogger().Error("openai create chat completion failed", zap.Error(err))
 			return "", err
 		}
-		if len(response.Choices) == 0 {
-			log.GetLogger().Info("openai stream receive no choices", zap.Any("response", response))
-			continue
+
+		if len(resp.Choices) == 0 {
+			log.GetLogger().Info("openai response has no choices")
+			return "", fmt.Errorf("no response choices available")
 		}
 
-		resContent += response.Choices[0].Delta.Content
+		resContent = resp.Choices[0].Message.Content
+	} else {
+		// Use streaming mode for text responses
+		stream, err := c.client.CreateChatCompletionStream(context.Background(), req)
+		if err != nil {
+			log.GetLogger().Error("openai create chat completion stream failed", zap.Error(err))
+			return "", err
+		}
+		defer stream.Close()
+
+		for {
+			response, err := stream.Recv()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				log.GetLogger().Error("openai stream receive failed", zap.Error(err))
+				return "", err
+			}
+			if len(response.Choices) == 0 {
+				log.GetLogger().Info("openai stream receive no choices", zap.Any("response", response))
+				continue
+			}
+
+			resContent += response.Choices[0].Delta.Content
+		}
 	}
 
 	if config.Conf.Openai.JsonLLM {

@@ -47,6 +47,7 @@ type Openai struct {
 	Model      string        `toml:"model"`
 	ApiKey     string        `toml:"api_key"`
 	JsonLLM    bool          `toml:"json_llm"`
+	Stream     bool          `toml:"stream"`
 	NoThinkTag bool          `toml:"nothink_tag"`
 	Whisper    OpenAiWhisper `toml:"whisper"`
 }
