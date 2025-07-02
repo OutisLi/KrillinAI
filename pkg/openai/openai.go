@@ -4,18 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	openai "github.com/sashabaranov/go-openai"
-	"go.uber.org/zap"
 	"io"
 	"krillin-ai/config"
 	"krillin-ai/log"
 	"net/http"
 	"os"
 	"strings"
+
+	openai "github.com/sashabaranov/go-openai"
+	"go.uber.org/zap"
 )
 
 func (c *Client) ChatCompletion(query string) (string, error) {
 	var responseFormat *openai.ChatCompletionResponseFormat
+	var systemMessage string
 
 	if config.Conf.Llm.Json {
 		responseFormat = &openai.ChatCompletionResponseFormat{
@@ -44,10 +46,12 @@ func (c *Client) ChatCompletion(query string) (string, error) {
 				}`),
 			},
 		}
+		systemMessage = "You are an assistant that helps with subtitle translation. Please return your response in JSON format according to the specified schema."
 	} else {
 		responseFormat = &openai.ChatCompletionResponseFormat{
 			Type: "text",
 		}
+		systemMessage = "You are an assistant that helps with subtitle translation."
 	}
 
 	req := openai.ChatCompletionRequest{
@@ -55,7 +59,7 @@ func (c *Client) ChatCompletion(query string) (string, error) {
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    openai.ChatMessageRoleSystem,
-				Content: "You are an assistant that helps with subtitle translation.",
+				Content: systemMessage,
 			},
 			{
 				Role:    openai.ChatMessageRoleUser,
@@ -100,6 +104,178 @@ func (c *Client) ChatCompletion(query string) (string, error) {
 			return "", err
 		}
 		return parsedContent, nil
+	}
+
+	return resContent, nil
+}
+
+// ChatCompletionSingle 专门用于单个翻译的聊天完成，使用单个翻译对象的JSON Schema
+func (c *Client) ChatCompletionSingle(query string) (string, error) {
+	var responseFormat *openai.ChatCompletionResponseFormat
+	var systemMessage string
+
+	if config.Conf.Llm.Json {
+		responseFormat = &openai.ChatCompletionResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
+				Name:   "single_translation_response",
+				Strict: true,
+				Schema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"original_sentence": {"type": "string"},
+						"translated_sentence": {"type": "string"}
+					},
+					"required": ["original_sentence", "translated_sentence"],
+					"additionalProperties": false
+				}`),
+			},
+		}
+		systemMessage = "You are an assistant that helps with subtitle translation. Please return your response in JSON format according to the specified schema."
+	} else {
+		responseFormat = &openai.ChatCompletionResponseFormat{
+			Type: "text",
+		}
+		systemMessage = "You are an assistant that helps with subtitle translation."
+	}
+
+	req := openai.ChatCompletionRequest{
+		Model: config.Conf.Llm.Model,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: systemMessage,
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: query,
+			},
+		},
+		Temperature:    0.9,
+		Stream:         true,
+		MaxTokens:      8192,
+		ResponseFormat: responseFormat,
+	}
+
+	stream, err := c.client.CreateChatCompletionStream(context.Background(), req)
+	if err != nil {
+		log.GetLogger().Error("openai create chat completion stream failed", zap.Error(err))
+		return "", err
+	}
+	defer stream.Close()
+
+	var resContent string
+	for {
+		response, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.GetLogger().Error("openai stream receive failed", zap.Error(err))
+			return "", err
+		}
+		if len(response.Choices) == 0 {
+			log.GetLogger().Info("openai stream receive no choices", zap.Any("response", response))
+			continue
+		}
+
+		resContent += response.Choices[0].Delta.Content
+	}
+
+	if config.Conf.Llm.Json {
+		// 直接返回JSON字符串，让调用方解析
+		return resContent, nil
+	}
+
+	return resContent, nil
+}
+
+// ChatCompletionSplitLong 专门用于长句分割的聊天完成，使用分割对象的JSON Schema
+func (c *Client) ChatCompletionSplitLong(query string) (string, error) {
+	var responseFormat *openai.ChatCompletionResponseFormat
+	var systemMessage string
+
+	if config.Conf.Llm.Json {
+		responseFormat = &openai.ChatCompletionResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
+				Name:   "split_long_sentence_response",
+				Strict: true,
+				Schema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"align": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"origin_part": {"type": "string"},
+									"translated_part": {"type": "string"}
+								},
+								"required": ["origin_part", "translated_part"],
+								"additionalProperties": false
+							}
+						}
+					},
+					"required": ["align"],
+					"additionalProperties": false
+				}`),
+			},
+		}
+		systemMessage = "You are an assistant that helps with subtitle translation. Please return your response in JSON format according to the specified schema."
+	} else {
+		responseFormat = &openai.ChatCompletionResponseFormat{
+			Type: "text",
+		}
+		systemMessage = "You are an assistant that helps with subtitle translation."
+	}
+
+	req := openai.ChatCompletionRequest{
+		Model: config.Conf.Llm.Model,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: systemMessage,
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: query,
+			},
+		},
+		Temperature:    0.9,
+		Stream:         true,
+		MaxTokens:      8192,
+		ResponseFormat: responseFormat,
+	}
+
+	stream, err := c.client.CreateChatCompletionStream(context.Background(), req)
+	if err != nil {
+		log.GetLogger().Error("openai create chat completion stream failed", zap.Error(err))
+		return "", err
+	}
+	defer stream.Close()
+
+	var resContent string
+	for {
+		response, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.GetLogger().Error("openai stream receive failed", zap.Error(err))
+			return "", err
+		}
+		if len(response.Choices) == 0 {
+			log.GetLogger().Info("openai stream receive no choices", zap.Any("response", response))
+			continue
+		}
+
+		resContent += response.Choices[0].Delta.Content
+	}
+
+	if config.Conf.Llm.Json {
+		// 直接返回JSON字符串，让调用方解析
+		return resContent, nil
 	}
 
 	return resContent, nil
@@ -156,6 +332,26 @@ func (c *Client) Text2Speech(text, voice string, outputFile string) error {
 }
 
 func parseJSONResponse(jsonStr string) (string, error) {
+	// 清理可能的markdown代码块格式
+	jsonStr = strings.TrimSpace(jsonStr)
+
+	// 移除可能的 ```json 开头和 ``` 结尾
+	if strings.HasPrefix(jsonStr, "```json") {
+		jsonStr = strings.TrimPrefix(jsonStr, "```json")
+		jsonStr = strings.TrimSpace(jsonStr)
+	} else if strings.HasPrefix(jsonStr, "```") {
+		jsonStr = strings.TrimPrefix(jsonStr, "```")
+		jsonStr = strings.TrimSpace(jsonStr)
+	}
+
+	if strings.HasSuffix(jsonStr, "```") {
+		jsonStr = strings.TrimSuffix(jsonStr, "```")
+		jsonStr = strings.TrimSpace(jsonStr)
+	}
+
+	// 记录清理后的JSON字符串用于调试
+	log.GetLogger().Debug("cleaned JSON response", zap.String("json", jsonStr))
+
 	var response struct {
 		Translations []struct {
 			Original   string `json:"original_sentence"`
@@ -165,6 +361,10 @@ func parseJSONResponse(jsonStr string) (string, error) {
 
 	err := json.Unmarshal([]byte(jsonStr), &response)
 	if err != nil {
+		// 记录原始响应以便调试
+		log.GetLogger().Error("failed to parse JSON after cleanup",
+			zap.Error(err),
+			zap.String("original_response", jsonStr))
 		return "", fmt.Errorf("failed to parse JSON: %v", err)
 	}
 

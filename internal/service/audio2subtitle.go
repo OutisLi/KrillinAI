@@ -9,6 +9,7 @@ import (
 	"krillin-ai/config"
 	"krillin-ai/internal/types"
 	"krillin-ai/log"
+	"krillin-ai/pkg/openai"
 	"krillin-ai/pkg/util"
 	"os"
 	"path/filepath"
@@ -116,14 +117,7 @@ func (s Service) transcribeAudio(id int, audioFilePath string, language string, 
 
 func (s Service) splitTextAndTranslate(basePath, inputText, targetLanguage string, enableModalFilter bool, id int) ([]*TranslatedItem, error) {
 	var prompt string
-	var promptPrefix string
-
-	promptPrefix = ""
-
-	//// 对于qwen3模型，开启非思考模式
-	//if config.Conf.Openai.NoThinkTag {
-	//	promptPrefix = "\\no_think\n"
-	//}
+	var promptPrefix = ""
 
 	// 选择提示词
 	if enableModalFilter {
@@ -198,31 +192,81 @@ func (s Service) splitTextAndTranslateV2(basePath, inputText string, originLang,
 			if index > 0 {
 				ctxBuilder.WriteString("上文:\n")
 				for i := start; i < index; i++ {
-					ctxBuilder.WriteString(fmt.Sprintf("%s", sentences[i]))
+					ctxBuilder.WriteString(sentences[i])
 				}
 			}
 			if index < len(sentences)-1 {
 				ctxBuilder.WriteString("下文:\n")
 				for i := index + 1; i <= end; i++ {
-					ctxBuilder.WriteString(fmt.Sprintf("%s", sentences[i]))
+					ctxBuilder.WriteString(sentences[i])
 				}
 			}
 
 			ctx := ctxBuilder.String()
-			prompt := fmt.Sprintf(types.SplitTextWithContextPrompt, types.GetStandardLanguageName(targetLang), ctx, originText)
 
-			translatedText, err := s.ChatCompleter.ChatCompletion(prompt)
-			if err != nil {
-				mutex.Lock()
-				select {
-				case errChan <- fmt.Errorf("splitTextAndTranslateV2 llm translate error: %w, original text: %s", err, originText):
-				default:
+			var prompt string
+			var translatedText string
+
+			if config.Conf.Llm.Json {
+				// 使用JSON模式的提示词
+				prompt = fmt.Sprintf(types.SplitTextWithContextPromptJson, types.GetStandardLanguageName(targetLang), ctx, originText)
+
+				// 使用类型断言来访问ChatCompletionSingle方法
+				if openaiClient, ok := s.ChatCompleter.(*openai.Client); ok {
+					response, err := openaiClient.ChatCompletionSingle(prompt)
+					if err != nil {
+						mutex.Lock()
+						select {
+						case errChan <- fmt.Errorf("splitTextAndTranslateV2 llm translate error: %w, original text: %s", err, originText):
+						default:
+						}
+						mutex.Unlock()
+						return
+					}
+
+					// 解析JSON响应
+					parsedResponse, err := parseSingleTranslationJSON(response)
+					if err != nil {
+						mutex.Lock()
+						select {
+						case errChan <- fmt.Errorf("splitTextAndTranslateV2 parse JSON error: %w, original text: %s, response: %s", err, originText, response):
+						default:
+						}
+						mutex.Unlock()
+						return
+					}
+					translatedText = parsedResponse
+				} else {
+					// 如果不是OpenAI客户端，降级使用普通ChatCompletion
+					response, err := s.ChatCompleter.ChatCompletion(prompt)
+					if err != nil {
+						mutex.Lock()
+						select {
+						case errChan <- fmt.Errorf("splitTextAndTranslateV2 llm translate error: %w, original text: %s", err, originText):
+						default:
+						}
+						mutex.Unlock()
+						return
+					}
+					translatedText = strings.TrimSpace(response)
 				}
-				mutex.Unlock()
-				return
+			} else {
+				// 使用文本模式的提示词
+				prompt = fmt.Sprintf(types.SplitTextWithContextPrompt, types.GetStandardLanguageName(targetLang), ctx, originText)
+
+				response, err := s.ChatCompleter.ChatCompletion(prompt)
+				if err != nil {
+					mutex.Lock()
+					select {
+					case errChan <- fmt.Errorf("splitTextAndTranslateV2 llm translate error: %w, original text: %s", err, originText):
+					default:
+					}
+					mutex.Unlock()
+					return
+				}
+				translatedText = strings.TrimSpace(response)
 			}
 
-			translatedText = strings.TrimSpace(translatedText)
 			results[index] = &TranslatedItem{
 				OriginText:     originText,
 				TranslatedText: translatedText,
@@ -1276,25 +1320,71 @@ func (s Service) splitTranslateItem(items []*TranslatedItem) ([]*TranslatedItem,
 func (s Service) splitLongSentence(item *TranslatedItem) ([]*TranslatedItem, error) {
 	prompt := fmt.Sprintf(types.SplitLongSentencePrompt, item.OriginText, item.TranslatedText)
 
-	response, err := s.ChatCompleter.ChatCompletion(prompt)
-	if err != nil {
-		return nil, fmt.Errorf("chat completion error: %w", err)
+	var response string
+	var err error
+	var splitResult []struct {
+		OriginPart     string `json:"origin_part"`
+		TranslatedPart string `json:"translated_part"`
 	}
 
-	var splitResult struct {
-		Align []struct {
-			OriginPart     string `json:"origin_part"`
-			TranslatedPart string `json:"translated_part"`
-		} `json:"align"`
-	}
-	if err := json.Unmarshal([]byte(util.CleanMarkdownCodeBlock(response)), &splitResult); err != nil {
-		log.GetLogger().Error("splitLongSentence parse split result error", zap.Error(err), zap.Any("response", response))
-		return nil, fmt.Errorf("parse split result error: %w", err)
+	if config.Conf.Llm.Json {
+		// 使用类型断言来访问ChatCompletionSplitLong方法
+		if openaiClient, ok := s.ChatCompleter.(*openai.Client); ok {
+			response, err = openaiClient.ChatCompletionSplitLong(prompt)
+			if err != nil {
+				return nil, fmt.Errorf("chat completion error: %w", err)
+			}
+
+			// 使用专门的JSON解析函数
+			splitResult, err = parseSplitLongJSON(response)
+			if err != nil {
+				log.GetLogger().Error("splitLongSentence parse split result error", zap.Error(err), zap.Any("response", response))
+				return nil, fmt.Errorf("parse split result error: %w", err)
+			}
+		} else {
+			// 如果不是OpenAI客户端，降级使用普通ChatCompletion
+			response, err = s.ChatCompleter.ChatCompletion(prompt)
+			if err != nil {
+				return nil, fmt.Errorf("chat completion error: %w", err)
+			}
+
+			// 使用原来的解析方式
+			var oldSplitResult struct {
+				Align []struct {
+					OriginPart     string `json:"origin_part"`
+					TranslatedPart string `json:"translated_part"`
+				} `json:"align"`
+			}
+			if err := json.Unmarshal([]byte(util.CleanMarkdownCodeBlock(response)), &oldSplitResult); err != nil {
+				log.GetLogger().Error("splitLongSentence parse split result error", zap.Error(err), zap.Any("response", response))
+				return nil, fmt.Errorf("parse split result error: %w", err)
+			}
+			splitResult = oldSplitResult.Align
+		}
+	} else {
+		// 文本模式
+		response, err = s.ChatCompleter.ChatCompletion(prompt)
+		if err != nil {
+			return nil, fmt.Errorf("chat completion error: %w", err)
+		}
+
+		// 使用原来的解析方式
+		var oldSplitResult struct {
+			Align []struct {
+				OriginPart     string `json:"origin_part"`
+				TranslatedPart string `json:"translated_part"`
+			} `json:"align"`
+		}
+		if err := json.Unmarshal([]byte(util.CleanMarkdownCodeBlock(response)), &oldSplitResult); err != nil {
+			log.GetLogger().Error("splitLongSentence parse split result error", zap.Error(err), zap.Any("response", response))
+			return nil, fmt.Errorf("parse split result error: %w", err)
+		}
+		splitResult = oldSplitResult.Align
 	}
 
 	// 转换为TranslatedItem切片
 	var splitItems []*TranslatedItem
-	for _, part := range splitResult.Align {
+	for _, part := range splitResult {
 		splitItems = append(splitItems, &TranslatedItem{
 			OriginText:     part.OriginPart,
 			TranslatedText: part.TranslatedPart,
@@ -1302,6 +1392,81 @@ func (s Service) splitLongSentence(item *TranslatedItem) ([]*TranslatedItem, err
 	}
 
 	return splitItems, nil
+}
+
+// parseSingleTranslationJSON 解析单个翻译对象的JSON响应
+func parseSingleTranslationJSON(jsonStr string) (string, error) {
+	// 清理可能的markdown代码块格式
+	jsonStr = strings.TrimSpace(jsonStr)
+
+	// 移除可能的 ```json 开头和 ``` 结尾
+	if strings.HasPrefix(jsonStr, "```json") {
+		jsonStr = strings.TrimPrefix(jsonStr, "```json")
+		jsonStr = strings.TrimSpace(jsonStr)
+	} else if strings.HasPrefix(jsonStr, "```") {
+		jsonStr = strings.TrimPrefix(jsonStr, "```")
+		jsonStr = strings.TrimSpace(jsonStr)
+	}
+
+	if strings.HasSuffix(jsonStr, "```") {
+		jsonStr = strings.TrimSuffix(jsonStr, "```")
+		jsonStr = strings.TrimSpace(jsonStr)
+	}
+
+	var response struct {
+		OriginalSentence   string `json:"original_sentence"`
+		TranslatedSentence string `json:"translated_sentence"`
+	}
+
+	err := json.Unmarshal([]byte(jsonStr), &response)
+	if err != nil {
+		log.GetLogger().Error("failed to parse single translation JSON",
+			zap.Error(err),
+			zap.String("response", jsonStr))
+		return "", fmt.Errorf("failed to parse single translation JSON: %v", err)
+	}
+
+	return response.TranslatedSentence, nil
+}
+
+// parseSplitLongJSON 解析长句分割的JSON响应
+func parseSplitLongJSON(jsonStr string) ([]struct {
+	OriginPart     string `json:"origin_part"`
+	TranslatedPart string `json:"translated_part"`
+}, error) {
+	// 清理可能的markdown代码块格式
+	jsonStr = strings.TrimSpace(jsonStr)
+
+	// 移除可能的 ```json 开头和 ``` 结尾
+	if strings.HasPrefix(jsonStr, "```json") {
+		jsonStr = strings.TrimPrefix(jsonStr, "```json")
+		jsonStr = strings.TrimSpace(jsonStr)
+	} else if strings.HasPrefix(jsonStr, "```") {
+		jsonStr = strings.TrimPrefix(jsonStr, "```")
+		jsonStr = strings.TrimSpace(jsonStr)
+	}
+
+	if strings.HasSuffix(jsonStr, "```") {
+		jsonStr = strings.TrimSuffix(jsonStr, "```")
+		jsonStr = strings.TrimSpace(jsonStr)
+	}
+
+	var response struct {
+		Align []struct {
+			OriginPart     string `json:"origin_part"`
+			TranslatedPart string `json:"translated_part"`
+		} `json:"align"`
+	}
+
+	err := json.Unmarshal([]byte(jsonStr), &response)
+	if err != nil {
+		log.GetLogger().Error("failed to parse split long JSON",
+			zap.Error(err),
+			zap.String("response", jsonStr))
+		return nil, fmt.Errorf("failed to parse split long JSON: %v", err)
+	}
+
+	return response.Align, nil
 }
 
 //func beautifyTranslateItems(language types.StandardLanguageCode, items []*TranslatedItem) {

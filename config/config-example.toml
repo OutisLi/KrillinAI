@@ -11,7 +11,6 @@
     port = 8888
 
 # 下方的配置不是都要填，请结合文档说明进行配置
-
 [llm] #支持openai,deepseek,通义千问等所有兼容openai请求格式的模型服务
     base_url = "" # 自定义base url，可配合转发站密钥使用，留空为openai官方api
     api_key = "" # API密钥
@@ -19,7 +18,7 @@
     json = false # 所使用的llm接口是否支持json格式，如果支持请设置为true，若不知道这是什么，请保持为false
 
 [transcribe] # 视频转文本支持多种方案，配置时先填provider，再填对应的配置
-    provider = "openai" #语音识别，当前可选值：openai,fasterwhisper,whisperkit,whisper.cpp,aliyun。(fasterwhisper不支持macOS,whisperkit只支持M芯片)
+    provider = "openai" #语音识别，当前可选值：openai,fasterwhisper,whisperkit,whisperx,whispercpp,aliyun。(fasterwhisper不支持macOS,whisperkit只支持M芯片)
     [transcribe.openai]
         base_url = ""
         api_key = ""
@@ -29,11 +28,11 @@
     [transcribe.whisperkit]
         model = "large-v2" # whisperkit的本地模型可选值：large-v2
     [transcribe.whisperx]
-        model = "large-v2" # whispercpp的本地模型可选值：large-v2
+        model = "large-v2" # whisperx的本地模型可选值：large-v2
     [transcribe.whispercpp]
         model = "large-v2" # whispercpp的本地模型可选值：large-v2
     [transcribe.aliyun] # provider选aliyun这块就都要填
-        [tts.aliyun.oss]
+        [transcribe.aliyun.oss]
             access_key_id = ""
             access_key_secret = ""
             bucket = ""
