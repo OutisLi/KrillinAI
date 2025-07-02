@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"krillin-ai/internal/storage"
+	"krillin-ai/internal/types"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -262,4 +263,140 @@ func GetAudioDuration(inputFile string) (float64, error) {
 	}
 
 	return duration, nil
+}
+
+// todo 后续再补充
+func IsAsianLanguage(code types.StandardLanguageCode) bool {
+	return code == types.LanguageNameSimplifiedChinese || code == types.LanguageNameTraditionalChinese || code == types.LanguageNameJapanese || code == types.LanguageNameKorean || code == types.LanguageNameThai
+}
+
+func BeautifyAsianLanguageSentence(input string) string {
+	if len(input) == 0 {
+		return input
+	}
+
+	// 不处理的
+	pairPunctuations := map[rune]rune{
+		'「': '」', '『': '』', '“': '”', '‘': '’',
+		'《': '》', '<': '>', '【': '】', '〔': '〕',
+		'(': ')', '[': ']', '{': '}',
+	}
+
+	// 需要处理的单标点
+	singlePunctuations := ",.;:!?~，、。！？；：…"
+
+	// 先处理字符串末尾的标点
+	runes := []rune(input)
+	i := len(runes) - 1
+	for i >= 0 {
+		r := runes[i]
+		// 如果是空格，继续检查前一个字符
+		if unicode.IsSpace(r) {
+			i--
+			continue
+		}
+		// 如果是单标点，去除
+		if strings.ContainsRune(singlePunctuations, r) {
+			runes = runes[:i]
+			i--
+		} else {
+			// 遇到非标点或成对标点，停止
+			break
+		}
+	}
+
+	// 中间的单标点替换为空格
+	var inPair bool
+	var expectedClose rune
+	var result []rune
+
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+
+		// 检查是否在成对标点内
+		if inPair {
+			if r == expectedClose {
+				inPair = false
+			}
+			result = append(result, r)
+			continue
+		}
+
+		// 检查是否是成对标点的开始
+		if close, isPair := pairPunctuations[r]; isPair {
+			inPair = true
+			expectedClose = close
+			result = append(result, r)
+			continue
+		}
+
+		// 检查是否是数字中的小数点
+		if r == '.' && i > 0 && i < len(runes)-1 {
+			prev := runes[i-1]
+			next := runes[i+1]
+			if unicode.IsDigit(prev) && unicode.IsDigit(next) {
+				result = append(result, r)
+				continue
+			}
+		}
+
+		// 处理单标点
+		if strings.ContainsRune(singlePunctuations, r) {
+			// 替换为空格，但避免连续空格
+			if len(result) > 0 && !unicode.IsSpace(result[len(result)-1]) {
+				result = append(result, ' ')
+			}
+		} else {
+			result = append(result, r)
+		}
+	}
+
+	return strings.TrimSpace(string(result))
+}
+
+// SplitTextSentences 将文本按常见的半全角分隔符号切分成句子，会考虑一些特殊的不用切分的情况
+func SplitTextSentences(text string) []string {
+	const (
+		dotPlaceholder   = "\u0001"
+		commaPlaceholder = "\u0002"
+		timePlaceholder  = "\u0003"
+	)
+
+	// 时间
+	timeRegex := regexp.MustCompile(`\b\d{1,2}(?::|\.)\d{2}\s+[ap]\.m\.`)
+	text = timeRegex.ReplaceAllStringFunc(text, func(m string) string {
+		return strings.ReplaceAll(m, ".", timePlaceholder)
+	})
+
+	// 千位分隔符
+	text = regexp.MustCompile(`\b\d{1,3}(?:,\d{3})+\b`).ReplaceAllStringFunc(text, func(m string) string {
+		return strings.ReplaceAll(m, ",", commaPlaceholder)
+	})
+
+	// 小数
+	text = regexp.MustCompile(`\b\d+\.\d+\b`).ReplaceAllStringFunc(text, func(m string) string {
+		return strings.ReplaceAll(m, ".", dotPlaceholder)
+	})
+
+	// 缩写词
+	text = regexp.MustCompile(`\b(?:[A-Za-z]\.){2,}[A-Za-z]?\b|\b[A-Z][a-z]*\.(?:[A-Z][a-z]*\.)+`).ReplaceAllStringFunc(text, func(m string) string {
+		return strings.ReplaceAll(m, ".", dotPlaceholder)
+	})
+
+	text = regexp.MustCompile(`([。.！!？?；;，,\n]+)`).ReplaceAllString(text, "${1}\u0000")
+
+	parts := strings.Split(text, "\u0000")
+
+	var sentences []string
+	for _, part := range parts {
+		s := strings.TrimSpace(part)
+		s = strings.ReplaceAll(s, timePlaceholder, ".")
+		s = strings.ReplaceAll(s, dotPlaceholder, ".")
+		s = strings.ReplaceAll(s, commaPlaceholder, ",")
+		if s != "" {
+			sentences = append(sentences, s)
+		}
+	}
+
+	return sentences
 }

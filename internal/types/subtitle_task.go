@@ -118,6 +118,32 @@ var TranslateVideoTitleAndDescriptionPrompt = `你是一个专业的翻译专家
 %s
 `
 
+var SplitLongSentencePrompt = `请将以下原文和译文分割成多个部分，确保每个部分都尽可能短：
+原文：%s
+译文：%s
+
+要求：
+1. 分割后的原文与原文不能有偏差 
+2. 分割后的每个翻译句都需要符合语法规范，可进行添加连词、去除助词等操作等保证每句读起来都是自然的
+3. 译文如果有遗漏，请在分割的同时补全
+4. 务必返回JSON格式，包含origin_part和translated_part数组，例如：
+{"align":[{"origin_part":"原文部分1","translated_part":"译文部分1"},{"origin_part":"原文部分2","translated_part":"译文部分2"}]}`
+
+var SplitTextWithContextPrompt = `你是一个专业翻译专家，擅长结合上下文进行准确翻译。请根据以下提供的上下文句子和目标句子，将目标句子翻译成%s，并确保翻译结果与上下文保持连贯一致：
+
+上下文句子：
+%s
+
+需要翻译的目标句子：%s
+
+翻译要求：
+1. 严格按照目标语言的语法和表达习惯翻译
+2. 保持专业术语的一致性
+3. 输出仅包含翻译后的文本，不添加任何额外解释或格式
+4. 确保翻译结果与上下文语义连贯
+
+请直接输出翻译结果：`
+
 type SmallAudio struct {
 	AudioFile         string
 	TranscriptionData *TranscriptionData
@@ -165,28 +191,32 @@ const (
 )
 
 const (
-	SubtitleTaskAudioFileName                           = "origin_audio.mp3"
-	SubtitleTaskVideoFileName                           = "origin_video.mp4"
-	SubtitleTaskSplitAudioFileNamePrefix                = "split_audio"
-	SubtitleTaskSplitAudioFileNamePattern               = SubtitleTaskSplitAudioFileNamePrefix + "_%03d.mp3"
-	SubtitleTaskSplitAudioTxtFileNamePattern            = "split_audio_txt_%d.txt"
-	SubtitleTaskSplitAudioWordsFileNamePattern          = "split_audio_words_%d.txt"
-	SubtitleTaskSplitSrtNoTimestampFileNamePattern      = "srt_no_ts_%d.srt"
-	SubtitleTaskSrtNoTimestampFileName                  = "srt_no_ts.srt"
-	SubtitleTaskSplitBilingualSrtFileNamePattern        = "split_bilingual_srt_%d.srt"
-	SubtitleTaskSplitShortOriginMixedSrtFileNamePattern = "split_short_origin_mixed_srt_%d.srt" //长中文+短英文
-	SubtitleTaskSplitShortOriginSrtFileNamePattern      = "split_short_origin_srt_%d.srt"       //短英文
-	SubtitleTaskBilingualSrtFileName                    = "bilingual_srt.srt"
-	SubtitleTaskShortOriginMixedSrtFileName             = "short_origin_mixed_srt.srt" //长中文+短英文
-	SubtitleTaskShortOriginSrtFileName                  = "short_origin_srt.srt"       //短英文
-	SubtitleTaskOriginLanguageSrtFileName               = "origin_language_srt.srt"
-	SubtitleTaskOriginLanguageTextFileName              = "origin_language.txt"
-	SubtitleTaskTargetLanguageSrtFileName               = "target_language_srt.srt"
-	SubtitleTaskTargetLanguageTextFileName              = "target_language.txt"
-	SubtitleTaskStepParamGobPersistenceFileName         = "step_param.gob"
-	SubtitleTaskTransferredVerticalVideoFileName        = "transferred_vertical_video.mp4"
-	SubtitleTaskHorizontalEmbedVideoFileName            = "horizontal_embed.mp4"
-	SubtitleTaskVerticalEmbedVideoFileName              = "vertical_embed.mp4"
+	SubtitleTaskAudioFileName                                    = "origin_audio.mp3"
+	SubtitleTaskVideoFileName                                    = "origin_video.mp4"
+	SubtitleTaskSplitAudioFileNamePrefix                         = "split_audio"
+	SubtitleTaskSplitAudioFileNamePattern                        = SubtitleTaskSplitAudioFileNamePrefix + "_%03d.mp3"
+	SubtitleTaskSplitAudioTxtFileNamePattern                     = "split_audio_txt_%d.txt"
+	SubtitleTaskSplitAudioWordsFileNamePattern                   = "split_audio_words_%d.txt"
+	SubtitleTaskSplitSrtNoTimestampFileNamePattern               = "srt_no_ts_%d.srt"
+	SubtitleTaskSrtNoTimestampFileName                           = "srt_no_ts.srt"
+	SubtitleTaskSplitBilingualSrtFileNamePattern                 = "split_bilingual_srt_%d.srt"
+	SubtitleTaskSplitShortOriginMixedSrtFileNamePattern          = "split_short_origin_mixed_srt_%d.srt" //长中文+短英文
+	SubtitleTaskSplitShortOriginSrtFileNamePattern               = "split_short_origin_srt_%d.srt"       //短英文
+	SubtitleTaskBilingualSrtFileName                             = "bilingual_srt.srt"
+	SubtitleTaskShortOriginMixedSrtFileName                      = "short_origin_mixed_srt.srt" //长中文+短英文
+	SubtitleTaskShortOriginSrtFileName                           = "short_origin_srt.srt"       //短英文
+	SubtitleTaskOriginLanguageSrtFileName                        = "origin_language_srt.srt"
+	SubtitleTaskOriginLanguageTextFileName                       = "origin_language.txt"
+	SubtitleTaskTargetLanguageSrtFileName                        = "target_language_srt.srt"
+	SubtitleTaskTargetLanguageTextFileName                       = "target_language.txt"
+	SubtitleTaskStepParamGobPersistenceFileName                  = "step_param.gob"
+	SubtitleTaskAudioTranscriptionDataPersistenceFileNamePattern = "audio_transcription_data_%d.json"
+	SubtitleTaskTranslationRawDataPersistenceFileNamePattern     = "audio_translation_raw_data_%d.json"
+	SubtitleTaskTranslationDataPersistenceFileNamePattern        = "translation_data_%d.json"
+	SubtitleTaskTransferredVerticalVideoFileName                 = "transferred_vertical_video.mp4"
+	SubtitleTaskHorizontalEmbedVideoFileName                     = "horizontal_embed.mp4"
+	SubtitleTaskVerticalEmbedVideoFileName                       = "vertical_embed.mp4"
+	SubtitleTaskVideoWithTtsFileName                             = "video_with_tts.mp4"
 )
 
 const (
@@ -210,7 +240,6 @@ type SubtitleTaskStepParam struct {
 	TaskBasePath                string
 	Link                        string
 	AudioFilePath               string
-	SmallAudios                 []*SmallAudio
 	SubtitleResultType          SubtitleResultType
 	EnableModalFilter           bool
 	EnableTts                   bool
@@ -229,7 +258,8 @@ type SubtitleTaskStepParam struct {
 	EmbedSubtitleVideoType      string // 合成字幕嵌入的视频类型 none不嵌入 horizontal横屏 vertical竖屏
 	VerticalVideoMajorTitle     string // 合成竖屏视频的主标题
 	VerticalVideoMinorTitle     string
-	MaxWordOneLine              int // 字幕一行最多显示多少个字
+	MaxWordOneLine              int    // 字幕一行最多显示多少个字
+	VideoWithTtsFilePath        string // 替换源视频的音频为tts结果后的视频路径
 }
 
 type SrtSentence struct {
