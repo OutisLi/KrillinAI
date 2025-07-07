@@ -21,6 +21,7 @@ type App struct {
 	TranslateParallelNum  int      `toml:"translate_parallel_num"`
 	TranscribeMaxAttempts int      `toml:"transcribe_max_attempts"`
 	TranslateMaxAttempts  int      `toml:"translate_max_attempts"`
+	MaxSentenceLength     int      `toml:"max_sentence_length"`
 	Proxy                 string   `toml:"proxy"`
 	ParsedProxy           *url.URL `toml:"-"`
 }
@@ -34,7 +35,6 @@ type OpenaiCompatibleConfig struct {
 	BaseUrl string `toml:"base_url"`
 	ApiKey  string `toml:"api_key"`
 	Model   string `toml:"model"`
-	Json    bool   `toml:"json"`
 }
 
 type LocalModelConfig struct {
@@ -99,6 +99,7 @@ var Conf = Config{
 		TranscribeParallelNum: 1,
 		TranscribeMaxAttempts: 3,
 		TranslateMaxAttempts:  3,
+		MaxSentenceLength:     70,
 	},
 	Server: Server{
 		Host: "127.0.0.1",
