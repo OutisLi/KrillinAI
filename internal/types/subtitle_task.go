@@ -157,23 +157,6 @@ var SplitTextWithContextPrompt = `你是一个专业翻译专家，擅长结合�
 
 请直接输出翻译结果：`
 
-var SplitTextWithContextPromptJson = `你是一个专业翻译专家，擅长结合上下文进行准确翻译。请根据以下提供的上下文句子和目标句子，将目标句子翻译成%s，并确保翻译结果与上下文保持连贯一致：
-
-上下文句子：
-%s
-
-需要翻译的目标句子：%s
-
-翻译要求：
-1. 严格按照目标语言的语法和表达习惯翻译
-2. 保持专业术语的一致性
-3. 输出格式必须是JSON格式，包含单个translation对象，具有original_sentence和translated_sentence字段
-4. 确保翻译结果与上下文语义连贯
-5. 原文要与输入完全一致，包括大小写和标点符号
-
-请按以下JSON格式输出：
-{"original_sentence": "原文", "translated_sentence": "翻译结果"}`
-
 type SmallAudio struct {
 	AudioFile         string
 	TranscriptionData *TranscriptionData
