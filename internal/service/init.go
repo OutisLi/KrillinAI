@@ -11,6 +11,7 @@ import (
 	"krillin-ai/pkg/whispercpp"
 	"krillin-ai/pkg/whisperkit"
 	"krillin-ai/pkg/whisperx"
+	"krillin-ai/pkg/localtts"
 
 	"go.uber.org/zap"
 )
@@ -56,6 +57,8 @@ func NewService() *Service {
 		ttsClient = openai.NewClient(config.Conf.Tts.Openai.BaseUrl, config.Conf.Tts.Openai.ApiKey, config.Conf.App.Proxy)
 	case "aliyun":
 		ttsClient = aliyun.NewTtsClient(config.Conf.Tts.Aliyun.Speech.AccessKeyId, config.Conf.Tts.Aliyun.Speech.AccessKeySecret, config.Conf.Tts.Aliyun.Speech.AppKey)
+	case "edge-tts":
+		ttsClient = localtts.NewEdgeTtsClient()
 	}
 
 	return &Service{

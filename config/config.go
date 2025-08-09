@@ -59,13 +59,14 @@ type AliyunTranscribeConfig struct {
 }
 
 type Transcribe struct {
-	Provider      string                 `toml:"provider"`
-	Openai        OpenaiCompatibleConfig `toml:"openai"`
-	Fasterwhisper LocalModelConfig       `toml:"fasterwhisper"`
-	Whisperkit    LocalModelConfig       `toml:"whisperkit"`
-	Whisperx      LocalModelConfig       `toml:"whisperx"`
-	Whispercpp    LocalModelConfig       `toml:"whispercpp"`
-	Aliyun        AliyunTranscribeConfig `toml:"aliyun"`
+	Provider              string                 `toml:"provider"`
+	EnableGpuAcceleration bool                   `toml:"enable_gpu_acceleration"`
+	Openai                OpenaiCompatibleConfig `toml:"openai"`
+	Fasterwhisper         LocalModelConfig       `toml:"fasterwhisper"`
+	Whisperkit            LocalModelConfig       `toml:"whisperkit"`
+	Whisperx              LocalModelConfig       `toml:"whisperx"`
+	Whispercpp            LocalModelConfig       `toml:"whispercpp"`
+	Aliyun                AliyunTranscribeConfig `toml:"aliyun"`
 }
 
 type AliyunTtsConfig struct {
@@ -109,7 +110,8 @@ var Conf = Config{
 		Model: "gpt-4o-mini",
 	},
 	Transcribe: Transcribe{
-		Provider: "openai",
+		Provider:              "openai",
+		EnableGpuAcceleration: false, // 默认不开启GPU加速
 		Openai: OpenaiCompatibleConfig{
 			Model: "whisper-1",
 		},
